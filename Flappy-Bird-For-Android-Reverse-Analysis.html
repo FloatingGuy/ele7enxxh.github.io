@@ -1,0 +1,79 @@
+<!DOCTYPE html><html lang="zh-Hans"><head><meta charset="utf-8"><meta name="X-UA-Compatible" content="IE=edge"><title> Flappy Bird安卓版 逆向分析 · Ele7enxxh's Blog</title><meta name="description" content="Flappy Bird安卓版 逆向分析 - ele7enxxh"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="short icon" href="/favicon.jpg"><link rel="stylesheet" href="/css/apollo.css"><link rel="stylesheet" href="http://fonts.useso.com/css?family=Source+Sans+Pro:400,600" type="text/css"></head><body><div class="wrap"><header><a href="/" class="logo-link"><img></a><ul class="nav nav-list"><li class="nav-list-item"><a href="/" target="_self" class="nav-list-link">BLOG</a></li><li class="nav-list-item"><a href="/archives/" target="_self" class="nav-list-link">ARCHIVE</a></li><li class="nav-list-item"><a href="http://weibo.com/5545520757" target="_blank" class="nav-list-link">WEIBO</a></li><li class="nav-list-item"><a href="https://github.com/ele7enxxh" target="_blank" class="nav-list-link">GITHUB</a></li><li class="nav-list-item"><a href="/atom.xml" target="_self" class="nav-list-link">RSS</a></li></ul></header><section class="container"><div class="post"><article class="post-block"><h1 class="post-title">Flappy Bird安卓版 逆向分析</h1><div class="post-info">Nov 1, 2014</div><div class="post-content"><p>本文通过逆向分析Flappy Bird安卓版，最后达到修改分数，取消水管碰撞检测，取消落地检测的效果。<a id="more"></a></p>
+<p>目标APK：Flappy Bird安卓版<br>使用工具：APK改之理<br>目的：修改每过一关的增长分数、取消水管碰撞检测、取消落地检测</p>
+<ul>
+<li><p><strong>修改每过一关的增长分数</strong><br>  反编译的步骤就不介绍了，我们直接来看反编译得到的文件夹：<br>  <img src="/images/Flappy-Bird-For-Android-Reverse-Analysis_1.png" alt="1"><br>  <strong>方法1</strong>：在smali目录下，我们看到org/andengine/，可以知晓游戏是由andengine引擎开发的。打开/res/raw/atlas.txt文件,找到如下信息：<br>  <img src="/images/Flappy-Bird-For-Android-Reverse-Analysis_2.png" alt="2"><br>  我们直接把number_score_00 01….08的坐标值全部修改为number_score_09的坐标值，重新打包并签名apk，运行测试，0-9关分数一直为9分，10-99关分数一直为99分。<br>  <strong>方法2</strong>：打开string.xml,没有找到有用的信息，由于代码是被混淆过的，无法直接根据类名找关键代码。我们换另一种方式，查找string变量，用工具apk改之理打开apk文件，选中smali/com/dotgears/文件夹，在软件右侧面板，按如下操作：<br>  <img src="/images/Flappy-Bird-For-Android-Reverse-Analysis_3.png" alt="3"><br>  在搜索结果中，有这样一条记录：</p>
+<pre><code>const-string v0, &quot;0123456789&quot;
+</code></pre><p>  我们不妨猜测该字符串是用来获取分数的，双击来到所在文件，\com\dotgears\h.smali。关键代码如下：</p>
+<pre><code># direct methods   
+.method static constructor &lt;clinit&gt;()V    
+.locals 1
+const-string v0, &quot;0123456789&quot;
+sput-object v0, Lcom/dotgears/h;-&gt;l:Ljava/lang/String;
+return-void   
+.end method
+</code></pre><p>  为了测试我们的猜测，直接将“0123456789”修改为“9999999999”，打包签名安装，运行测试，0-9关分数一直为9分，10-99关分数一直为99分。猜测正确。</p>
+<pre><code>sput-object v0, Lcom/dotgears/h;-&gt;l:Ljava/lang/String  //将string类型的变量I赋值为“0123456789”
+</code></pre><p>  我们在当前文件查找l:Ljava/lang/String, 在方法.method public a(II)V中发现调用，部分代码为：</p>
+<pre><code>sget-object v5, Lcom/dotgears/h;-&gt;l:Ljava/lang/String;
+invoke-virtual {v5, v2}, Ljava/lang/String;-&gt;charAt(I)C
+</code></pre><p>  我们转到反编译出的java代码来仔细看下该方法：</p>
+<pre><code>public void a(int paramInt1, int paramInt2)
+{
+    this.k = 0;
+    int m = paramInt1;
+    if (paramInt2 &lt;= 0);
+    for (int i1 = 0; ; i1++)
+    {
+      if (i1 &gt;= this.k)
+      {
+        if (this.k == 0)
+        {
+          this.i[0] = &apos;0&apos;;
+          this.k = 1;
+        }
+        return;
+        if (m &lt;= 0);
+        while (true)
+        {
+          paramInt2--;
+          break;
+          int n = m % 10;
+          m /= 10;
+          this.j[this.k] = l.charAt(n);
+          this.k = (1 + this.k);
+        }
+      }
+      this.i[i1] = this.j[(-1 + (this.k - i1))];
+    }
+}
+</code></pre><p>  参数paramInt1为所得分数，paramInt2为所得分数位数</p>
+<pre><code>int n = m % 10; //获取分数低位
+m /= 10; //获取分数高位
+this.j[this.k] = l.charAt(n); //取分数
+</code></pre><p>  验证：我们直接在该方法中对参数进行赋值，然后打包签名，安装测试即可。事实上，该方法的作用是实时更新界面上方的显示的分数。<br>  通过修改此处的参数paramInt1的值，我们就可以修改上方显示的分数，但是最终记录的分数仍然未改变，为此我们必须找到该方法在哪里被程序调用，以及参数paramInt1是如何得来的。<br>  利用ida或者jeb定位到上层调用方法：</p>
+<pre><code>this.an.a(this.y, 20);
+</code></pre><p>  即参数paramInt1为this.y，参数paramInt2固定取20。<br>  继续往上搜索变量this.y，来到此处：</p>
+<pre><code>if ((this.ao &gt; 0) &amp;&amp; (this.ak &lt;= 0) &amp;&amp; ((this.ag == this.J.b) || (this.ag == -1 + this.J.b)))
+{
+    this.y = (1 + this.y);
+    c(9, 0);
+}
+</code></pre><p>  this.y在前面已被初始化为0，此处，if循环应为判断是否得分的条件，如果为真，则分数加1。显然，我们直接将1修改为我们所希望的增长分数即可。打开对应的smali文件：/dotgears/flappy/c.smali，修改第489行代码：</p>
+<pre><code>add-int/lit8 v0, v0, 0x1 -&gt; add-int/lit8 v0, v0, 0x*  //*为你所希望的增长分数(16进制)
+</code></pre><p>  重新打包，签名安装，测试通过。</p>
+</li>
+<li><p><strong>取消水管碰撞检测</strong><br>  修改文件：/com/dotgears/flappy/c.smali<br>  修改前后对比（这个方法就是水管的碰撞检测，直接使返回值固定为0即可）：<br>  <img src="/images/Flappy-Bird-For-Android-Reverse-Analysis_4.png" alt="4"><br>  <img src="/images/Flappy-Bird-For-Android-Reverse-Analysis_5.png" alt="5"></p>
+</li>
+<li><p><strong>取消落地检测</strong><br>  修改文件：/com/dotgears/flappy/c.smali<br>  修改方法.method public b(F)V中部分代码，修改前后对比（取消落地检测判断，无条件跳转）：<br>  <img src="/images/Flappy-Bird-For-Android-Reverse-Analysis_6.png" alt="6"><br>  <img src="/images/Flappy-Bird-For-Android-Reverse-Analysis_7.png" alt="7"></p>
+</li>
+</ul>
+<p>工具下载地址：<a href="http://pan.baidu.com/s/1ntyk1uT" target="_blank" rel="external">http://pan.baidu.com/s/1ntyk1uT</a><br>原始apk：<a href="http://pan.baidu.com/s/1jGsQTfS" target="_blank" rel="external">http://pan.baidu.com/s/1jGsQTfS</a></p>
+</div></article></div></section><footer><div class="paginator"><a href="/Android-Shared-Library-Injection.html" class="prev">PREV</a></div><div id="disqus_thread"></div><script>var disqus_shortname = 'ele7enxxh';
+var disqus_identifier = 'Flappy-Bird-For-Android-Reverse-Analysis.html';
+var disqus_title = 'Flappy Bird安卓版 逆向分析';
+var disqus_url = 'http://ele7enxxh.com/Flappy-Bird-For-Android-Reverse-Analysis.html';
+(function() {
+    var dsq = document.createElement('script'); dsq.type = 'text/javascript'; dsq.async = true;
+    dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+})();</script><script id="dsq-count-scr" src="//ele7enxxh.disqus.com/count.js" async></script><div class="copyright"><p>© 2015 - 2016 <a href="http://ele7enxxh.com">ele7enxxh</a>, unless otherwise noted.</p></div></footer></div><script async src="//cdn.bootcss.com/mathjax/2.6.1/MathJax.js?config=TeX-MML-AM_CHTML"></script></body></html>
